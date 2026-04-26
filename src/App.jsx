@@ -1,3 +1,4 @@
+// Trigger Vercel Deploy
 import React, { useState, useEffect, useRef } from 'react';
 import { Zap, Bell, Search, X } from 'lucide-react';
 import Sidebar from './Sidebar';
