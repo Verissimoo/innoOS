@@ -472,8 +472,6 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
             <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-2)', letterSpacing: '0.05em', marginBottom: 16 }}>Checklist de Saúde</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {checklist.map(item => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer' }} onClick={() => toggleCheck(item.id)}>
-                  <div style={{ 
                 <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer' }}>
                   <div onClick={() => toggleCheck(item.id)} style={{ 
                     width: 18, height: 18, borderRadius: 4, border: `1px solid ${item.concluido ? 'var(--primary)' : 'var(--border)'}`, 
