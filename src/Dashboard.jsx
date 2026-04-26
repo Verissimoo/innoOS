@@ -18,7 +18,7 @@ export default function Dashboard({ onNavigate }) {
   const dateStr = today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ activeClients: 0, activeAuto: 0, implantando: 0, mrr: 0, automacoes: [] });
+  const [stats, setStats] = useState({ activeClients: 0, activeAuto: 0, implantando: 0, mrr: 0, totalRecebidoImpl: 0, automacoes: [] });
 
   React.useEffect(() => {
     async function loadStats() {
@@ -35,8 +35,9 @@ export default function Dashboard({ onNavigate }) {
         const activeAuto = automacoes.filter(a => a.status === 'Ativa').length;
         const implantando = automacoes.filter(a => a.status === 'Em Implantação').length;
         const mrr = automacoes.filter(a => a.status === 'Ativa').reduce((acc, a) => acc + (a.valor_mensal || 0), 0);
+        const totalRecebidoImpl = automacoes.filter(a => a.pago).reduce((acc, a) => acc + (a.valor_impl || 0), 0);
 
-        setStats({ activeClients, activeAuto, implantando, mrr, automacoes });
+        setStats({ activeClients, activeAuto, implantando, mrr, totalRecebidoImpl, automacoes });
       } catch (err) {
         console.error(err);
       }
@@ -97,7 +98,7 @@ export default function Dashboard({ onNavigate }) {
           value={`R$ ${stats.mrr.toLocaleString('pt-BR')}`}
           icon={DollarSign}
           accent="#A78BFA"
-          trend={`+ R$ ${FINANCEIRO.totalRecebidoImpl.toLocaleString('pt-BR')} em implementações`}
+          trend={`+ R$ ${(stats.totalRecebidoImpl || 0).toLocaleString('pt-BR')} em implementações (recebido)`}
         />
       </div>
 
@@ -151,9 +152,9 @@ export default function Dashboard({ onNavigate }) {
             <div style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: 18 }}>Resumo Financeiro</div>
             <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div style={{ padding: '18px 20px', background: 'rgba(0,255,178,0.05)', border: '1px solid rgba(0,255,178,0.15)', borderRadius: 12 }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Total em Implementações</div>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--primary)' }}>R$ {FINANCEIRO.totalRecebidoImpl.toLocaleString('pt-BR')}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-2)', marginTop: 6 }}>3 projetos entregues</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Total Implementações (Recebido)</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--primary)' }}>R$ {(stats.totalRecebidoImpl || 0).toLocaleString('pt-BR')}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-2)', marginTop: 6 }}>{stats.automacoes?.filter(a => a.pago).length || 0} projetos pagos</div>
               </div>
               <div style={{ padding: '18px 20px', background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)', borderRadius: 12 }}>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Recorrência Mensal (MRR)</div>

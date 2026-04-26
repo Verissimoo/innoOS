@@ -25,6 +25,7 @@ const emptyForm = {
   nome: '', categoria: '', tipo: 'Agente de IA', status: 'Ideia',
   cliente: '', descricao: '', stack: [], stackInput: '',
   valorImpl: '', valorMensal: '', dataInicio: '', observacoes: '',
+  pago: false,
 };
 
 export default function AutomacoesView({ onSelectAutomacao }) {
@@ -80,7 +81,7 @@ export default function AutomacoesView({ onSelectAutomacao }) {
   async function handleSave() {
     if (!validate()) return;
     
-    let clienteId = form.cliente ? parseInt(form.cliente) : null;
+    let clienteId = form.cliente || null;
     
     if (isAddingClient && form.newClienteName?.trim()) {
       const novoClienteObj = {
@@ -104,6 +105,7 @@ export default function AutomacoesView({ onSelectAutomacao }) {
       valor_mensal: parseFloat(form.valorMensal) || 0,
       data_inicio: form.dataInicio || null,
       observacoes: form.observacoes,
+      pago: form.pago || false,
     };
     
     const { data, error } = await supabase.from('inn_automacoes').insert([payload]).select('*, inn_clientes(id, nome)').single();
@@ -417,6 +419,15 @@ export default function AutomacoesView({ onSelectAutomacao }) {
                   <label className="form-label">Valor Implementação (R$)</label>
                   <input className="form-input" type="number" placeholder="1000"
                     value={form.valorImpl} onChange={e => setForm(f => ({ ...f, valorImpl: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <label className="form-label" style={{ marginBottom: 8 }}>Implementação Recebida?</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <input type="checkbox" checked={form.pago} onChange={e => setForm(f => ({ ...f, pago: e.target.checked }))} style={{ width: 16, height: 16 }} />
+                    <span style={{ color: form.pago ? 'var(--primary)' : 'var(--text-2)' }}>
+                      {form.pago ? 'Sim, valor já recebido' : 'Não, aguardando pagamento'}
+                    </span>
+                  </label>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Recorrência Mensal (R$)</label>
