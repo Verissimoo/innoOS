@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Plus, Edit2, Save, X, MessageSquare, Calendar, DollarSign, Check } from 'lucide-react';
-import { CLIENTES as INIT, AUTOMACOES, STATUS_CONFIG } from './data';
+import { STATUS_CONFIG } from './data';
+import { supabase } from './lib/supabase';
 
 function Badge({ status }) {
-  const cfg = STATUS_CONFIG[status] || {};
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG['Ideia'] || {};
   return <span className="badge" style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}30` }}>{cfg.label || status}</span>;
 }
 
@@ -13,7 +14,10 @@ const emptyClientForm = {
 };
 
 export default function ClientesView() {
-  const [clientes, setClientes] = useState(INIT);
+  const [clientes, setClientes] = useState([]);
+  const [automacoes, setAutomacoes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
   const [selected, setSelected] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({});
@@ -21,9 +25,22 @@ export default function ClientesView() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(emptyClientForm);
 
-  const clienteAutos = (id) => AUTOMACOES.filter(a => a.cliente === id);
-  const mrr = (id) => AUTOMACOES.filter(a => a.cliente === id && a.status === 'Ativa').reduce((acc, a) => acc + a.valorMensal, 0);
-  const totalImpl = (id) => AUTOMACOES.filter(a => a.cliente === id).reduce((acc, a) => acc + a.valorImpl, 0);
+  useEffect(() => { fetchAll(); }, []);
+
+  async function fetchAll() {
+    setLoading(true);
+    const [{ data: clis }, { data: auts }] = await Promise.all([
+      supabase.from('inn_clientes').select('*').order('nome'),
+      supabase.from('inn_automacoes').select('*')
+    ]);
+    setClientes(clis || []);
+    setAutomacoes(auts || []);
+    setLoading(false);
+  }
+
+  const clienteAutos = (id) => automacoes.filter(a => a.cliente_id === id);
+  const mrr = (id) => automacoes.filter(a => a.cliente_id === id && a.status === 'Ativa').reduce((acc, a) => acc + (a.valor_mensal || 0), 0);
+  const totalImpl = (id) => automacoes.filter(a => a.cliente_id === id).reduce((acc, a) => acc + (a.valor_impl || 0), 0);
 
   const openClient = (c) => {
     setSelected(c);
@@ -31,46 +48,77 @@ export default function ClientesView() {
     setEditMode(false);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
+    const payload = {
+      nome: editData.nome,
+      segmento: editData.segmento,
+      whatsapp: editData.whatsapp,
+      contato: editData.contato,
+      email: editData.email,
+      observacoes: editData.observacoes,
+      status: editData.status
+    };
+    
+    const { error } = await supabase.from('inn_clientes').update(payload).eq('id', selected.id);
+    if (error) {
+      alert('Erro ao salvar. Pode ser que falte criar as colunas (status, contato, etc) no Supabase.\nErro: ' + error.message);
+      return;
+    }
+    
     setClientes(prev => prev.map(c => c.id === selected.id ? { ...c, ...editData } : c));
     setSelected({ ...selected, ...editData });
     setEditMode(false);
   };
 
-  const addNota = () => {
+  const addNota = async () => {
     if (!newNota.trim()) return;
     const nota = {
       id: Date.now(),
       data: new Date().toLocaleDateString('pt-BR'),
       texto: newNota.trim(),
     };
-    const updated = clientes.map(c =>
-      c.id === selected.id ? { ...c, notas: [nota, ...c.notas] } : c
-    );
-    setClientes(updated);
-    setSelected(prev => ({ ...prev, notas: [nota, ...prev.notas] }));
+    
+    const notasAtuais = selected.notas || [];
+    const novasNotas = [nota, ...notasAtuais];
+    
+    const { error } = await supabase.from('inn_clientes').update({ notas: novasNotas }).eq('id', selected.id);
+    if (error) {
+      alert('Erro ao salvar nota. Verifique se a coluna "notas" (JSONB) existe na tabela inn_clientes.\nErro: ' + error.message);
+      return;
+    }
+    
+    setClientes(prev => prev.map(c => c.id === selected.id ? { ...c, notas: novasNotas } : c));
+    setSelected(prev => ({ ...prev, notas: novasNotas }));
     setNewNota('');
   };
 
-  const handleSaveNewClient = () => {
+  const handleSaveNewClient = async () => {
     if (!form.nome.trim()) return;
-    const newClient = {
-      id: Date.now(),
+    const payload = {
       nome: form.nome,
       segmento: form.segmento,
-      contato: form.contato,
       whatsapp: form.whatsapp,
+      contato: form.contato,
       email: form.email,
       observacoes: form.observacoes,
       status: form.status,
-      dataInicio: new Date().toISOString().split('T')[0],
-      responsavelInterno: 'A definir',
       notas: []
     };
-    setClientes(prev => [newClient, ...prev]);
+    
+    const { data, error } = await supabase.from('inn_clientes').insert([payload]).select().single();
+    if (error) {
+      alert('Erro ao criar cliente! Faltam colunas no banco de dados (status, contato, email, observacoes, notas).\nErro: ' + error.message);
+      return;
+    }
+    
+    setClientes(prev => [data, ...prev]);
     setModal(false);
     setForm(emptyClientForm);
   };
+
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-2)' }}>Carregando dados...</div>;
+  }
 
   // LISTA
   if (!selected) {
@@ -262,8 +310,7 @@ export default function ClientesView() {
                   { label: 'Contato', val: selected.contato },
                   { label: 'WhatsApp', val: selected.whatsapp },
                   { label: 'E-mail', val: selected.email },
-                  { label: 'Responsável Interno', val: selected.responsavelInterno },
-                  { label: 'Início', val: new Date(selected.dataInicio + 'T12:00').toLocaleDateString('pt-BR') },
+                  { label: 'Início', val: selected.created_at ? new Date(selected.created_at).toLocaleDateString('pt-BR') : 'N/A' },
                 ].map(({ label, val }) => (
                   <div key={label}>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
