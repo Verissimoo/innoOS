@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Edit2, Archive, Check, Plus, Clock } from 'lucide-react';
+import { ArrowLeft, Edit2, Archive, Check, Plus, Clock, X, Save } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
 
@@ -25,11 +25,32 @@ const FASES = [
 ];
 
 export default function ProjetoDetalheView({ projeto, onBack }) {
+  const [localStatus, setLocalStatus] = useState(projeto.status);
+
   // Determine current phase
   let currentFase = 2; // Default for others
-  if (projeto.status === 'Portfólio' || projeto.status === 'Ideia') currentFase = 1;
-  else if (projeto.status === 'Em Implantação') currentFase = 4;
-  else if (projeto.status === 'Ativa') currentFase = 5;
+  if (localStatus === 'Portfólio' || localStatus === 'Ideia') currentFase = 1;
+  else if (localStatus === 'Testes') currentFase = 3;
+  else if (localStatus === 'Em Implantação') currentFase = 4;
+  else if (localStatus === 'Ativa') currentFase = 5;
+
+  const FASE_MAP = {
+    1: 'Ideia',
+    2: 'Desenvolvimento',
+    3: 'Testes',
+    4: 'Em Implantação',
+    5: 'Ativa'
+  };
+
+  async function handleFaseClick(faseId) {
+    const newStatus = FASE_MAP[faseId];
+    setLocalStatus(newStatus);
+    const { error } = await supabase.from('inn_automacoes').update({ status: newStatus }).eq('id', projeto.id);
+    if (error) {
+      alert("Erro ao atualizar etapa: " + error.message);
+      setLocalStatus(projeto.status);
+    }
+  }
 
   // Kanban State
   const [tarefas, setTarefas] = useState([]);
@@ -42,6 +63,17 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
 
   // Checklist State
   const [checklist, setChecklist] = useState([]);
+  const [newCheckItem, setNewCheckItem] = useState('');
+  
+  // Detalhes Editáveis
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    nome: projeto.nome,
+    categoria: projeto.categoria,
+    valor_impl: projeto.valor_impl || 0,
+    valor_mensal: projeto.valor_mensal || 0,
+    stack: projeto.stack ? projeto.stack.join(', ') : ''
+  });
   
   const DEFAULT_CHECKLIST = [
     'Briefing documentado',
@@ -133,6 +165,39 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     }
   }
 
+  async function handleAddCheck() {
+    if (!newCheckItem.trim()) return;
+    const payload = { automacao_id: projeto.id, item: newCheckItem.trim(), concluido: false, ordem: checklist.length };
+    const { data, error } = await supabase.from('inn_checklist').insert([payload]).select().single();
+    if (data && !error) setChecklist(prev => [...prev, data]);
+    setNewCheckItem('');
+  }
+
+  async function handleDeleteCheck(e, id) {
+    e.stopPropagation();
+    setChecklist(prev => prev.filter(c => c.id !== id));
+    await supabase.from('inn_checklist').delete().eq('id', id);
+  }
+
+  async function saveProjectDetails() {
+    const stackArr = editForm.stack.split(',').map(s => s.trim()).filter(Boolean);
+    const payload = {
+      nome: editForm.nome,
+      categoria: editForm.categoria,
+      valor_impl: Number(editForm.valor_impl),
+      valor_mensal: Number(editForm.valor_mensal),
+      stack: stackArr
+    };
+    
+    const { error } = await supabase.from('inn_automacoes').update(payload).eq('id', projeto.id);
+    if (!error) {
+      Object.assign(projeto, payload); // Modifica prop para refletir na UI sem recarregar tudo
+      setEditMode(false);
+    } else {
+      alert("Erro ao salvar informações: " + error.message);
+    }
+  }
+
   // Metrics
   const tarefasConcluidas = tarefas.filter(t => t.status === 'Concluído').length;
   const totalTarefas = tarefas.length;
@@ -150,15 +215,30 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
           <ArrowLeft size={20} />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h1 className="page-title" style={{ margin: 0 }}>{projeto.nome}</h1>
-            <Badge status={projeto.status} />
-          </div>
-          <p className="page-subtitle" style={{ margin: 0, marginTop: 4 }}>{projeto.categoria}</p>
+          {editMode ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input className="form-input" style={{ width: 250 }} value={editForm.nome} onChange={e => setEditForm({ ...editForm, nome: e.target.value })} />
+              <input className="form-input" style={{ width: 150 }} value={editForm.categoria} onChange={e => setEditForm({ ...editForm, categoria: e.target.value })} />
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <h1 className="page-title" style={{ margin: 0 }}>{projeto.nome}</h1>
+                <Badge status={localStatus} />
+              </div>
+              <p className="page-subtitle" style={{ margin: 0, marginTop: 4 }}>{projeto.categoria}</p>
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <button className="btn btn-ghost"><Edit2 size={16} /> Editar</button>
-          <button className="btn btn-ghost"><Archive size={16} /> Arquivar</button>
+          {editMode ? (
+            <>
+              <button className="btn btn-ghost" onClick={() => setEditMode(false)}><X size={16} /> Cancelar</button>
+              <button className="btn btn-primary" onClick={saveProjectDetails}><Save size={16} /> Salvar Alterações</button>
+            </>
+          ) : (
+            <button className="btn btn-ghost" onClick={() => setEditMode(true)}><Edit2 size={16} /> Editar Informações</button>
+          )}
         </div>
       </div>
 
@@ -192,10 +272,15 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
                 }
 
                 return (
-                  <div key={f.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, flex: 1 }}>
+                  <div key={f.id} 
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, flex: 1, cursor: 'pointer' }}
+                    onClick={() => handleFaseClick(f.id)}
+                    title="Clique para alterar a etapa atual"
+                  >
                     <div style={{ 
                       width: 32, height: 32, borderRadius: '50%', background: bgColor, border: `2px solid ${borderColor}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700, color
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700, color,
+                      transition: 'all 0.2s'
                     }}>
                       {isCompleted ? <Check size={16} /> : f.id}
                     </div>
@@ -331,11 +416,19 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', marginBottom: 4 }}>Valor Implantação</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--primary)' }}>{projeto.valor_impl ? `R$ ${projeto.valor_impl.toLocaleString('pt-BR')}` : '-'}</div>
+                {editMode ? (
+                  <input type="number" className="form-input" value={editForm.valor_impl} onChange={e => setEditForm({...editForm, valor_impl: e.target.value})} style={{ padding: '4px 8px' }} />
+                ) : (
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--primary)' }}>{projeto.valor_impl ? `R$ ${projeto.valor_impl.toLocaleString('pt-BR')}` : '-'}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', marginBottom: 4 }}>Recorrência Mensal</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#A78BFA' }}>{projeto.valor_mensal ? `R$ ${projeto.valor_mensal.toLocaleString('pt-BR')}/mês` : '-'}</div>
+                {editMode ? (
+                  <input type="number" className="form-input" value={editForm.valor_mensal} onChange={e => setEditForm({...editForm, valor_mensal: e.target.value})} style={{ padding: '4px 8px' }} />
+                ) : (
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#A78BFA' }}>{projeto.valor_mensal ? `R$ ${projeto.valor_mensal.toLocaleString('pt-BR')}/mês` : '-'}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', marginBottom: 4 }}>Data de Início</div>
@@ -343,9 +436,13 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-2)', marginBottom: 8 }}>Stack & Ferramentas</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {projeto.stack && projeto.stack.length > 0 ? projeto.stack.map(s => <StackTag key={s} tag={s} />) : <span style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>Nenhuma informada</span>}
-                </div>
+                {editMode ? (
+                  <input className="form-input" placeholder="Separado por vírgulas..." value={editForm.stack} onChange={e => setEditForm({...editForm, stack: e.target.value})} style={{ padding: '4px 8px' }} />
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {projeto.stack && projeto.stack.length > 0 ? projeto.stack.map(s => <StackTag key={s} tag={s} />) : <span style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>Nenhuma informada</span>}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -377,19 +474,41 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
               {checklist.map(item => (
                 <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer' }} onClick={() => toggleCheck(item.id)}>
                   <div style={{ 
+                <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer' }}>
+                  <div onClick={() => toggleCheck(item.id)} style={{ 
                     width: 18, height: 18, borderRadius: 4, border: `1px solid ${item.concluido ? 'var(--primary)' : 'var(--border)'}`, 
                     background: item.concluido ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2, transition: 'all 0.2s'
                   }}>
                     {item.concluido && <Check size={12} color="#000" />}
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: item.concluido ? 'var(--text-2)' : 'var(--text-1)', textDecoration: item.concluido ? 'line-through' : 'none', lineHeight: 1.4, transition: 'all 0.2s' }}>
+                  <div style={{ flex: 1, fontSize: '0.85rem', color: item.concluido ? 'var(--text-2)' : 'var(--text-1)', textDecoration: item.concluido ? 'line-through' : 'none' }}>
                     {item.item}
                   </div>
+                  <button 
+                    className="btn btn-ghost" 
+                    style={{ padding: 4, color: '#EF4444' }} 
+                    onClick={(e) => handleDeleteCheck(e, item.id)}
+                    title="Excluir Item"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               ))}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <input 
+                  className="form-input" 
+                  style={{ flex: 1, padding: '6px 12px', fontSize: '0.85rem' }} 
+                  placeholder="Novo item do checklist..." 
+                  value={newCheckItem} 
+                  onChange={e => setNewCheckItem(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddCheck()}
+                />
+                <button className="btn btn-primary" style={{ padding: '6px 16px' }} onClick={handleAddCheck}>
+                  <Plus size={14} /> Adicionar
+                </button>
+              </div>
             </div>
           </div>
-
         </div>
       </div>
     </div>
