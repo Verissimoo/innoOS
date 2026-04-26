@@ -38,18 +38,30 @@ export default function AgendaRituaisView() {
 
 // ─── AGENDA ──────────────────────────────────
 function AgendaTab() {
-  const [compromissos, setCompromissos] = useState(INIT_COMP);
+  const [compromissos, setCompromissos] = useState(() => {
+    const saved = localStorage.getItem('inn_compromissos');
+    return saved ? JSON.parse(saved) : INIT_COMP;
+  });
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ titulo: '', data: '', hora: '', tipo: 'Reunião Cliente', descricao: '' });
   const [errors, setErrors] = useState({});
 
+  // Salva no localStorage sempre que mudar
+  React.useEffect(() => {
+    localStorage.setItem('inn_compromissos', JSON.stringify(compromissos));
+  }, [compromissos]);
+
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const next7 = [...compromissos]
     .filter(c => {
-      const diff = (new Date(c.data) - today) / 86400000;
-      return diff >= -1 && diff <= 30;
+      // ajusta para o fuso local para não sumir no mesmo dia
+      const compDate = new Date(c.data + 'T00:00:00');
+      const diff = (compDate - today) / 86400000;
+      return diff >= 0 && diff <= 30;
     })
-    .sort((a, b) => new Date(a.data) - new Date(b.data));
+    .sort((a, b) => new Date(a.data + 'T' + a.hora) - new Date(b.data + 'T' + b.hora));
 
   const validate = () => {
     const e = {};
@@ -65,6 +77,12 @@ function AgendaTab() {
     setCompromissos(prev => [...prev, { ...form, id: Date.now() }]);
     setModal(false);
     setForm({ titulo: '', data: '', hora: '', tipo: 'Reunião Cliente', descricao: '' });
+  };
+
+  const handleDelete = (id) => {
+    if (window.confirm("Deseja excluir este compromisso?")) {
+      setCompromissos(prev => prev.filter(c => c.id !== id));
+    }
   };
 
   const formatDate = (d) => {
@@ -104,6 +122,14 @@ function AgendaTab() {
                   </div>
                   {c.descricao && <div style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{c.descricao}</div>}
                 </div>
+                <button 
+                  className="btn btn-ghost" 
+                  style={{ padding: 6, color: '#EF4444' }} 
+                  onClick={() => handleDelete(c.id)}
+                  title="Excluir"
+                >
+                  <X size={16} />
+                </button>
               </div>
             </div>
           );
@@ -164,10 +190,17 @@ function AgendaTab() {
 
 // ─── RITUAIS ─────────────────────────────────
 function RituaisTab() {
-  const [rituais, setRituais] = useState(INIT_RIT);
+  const [rituais, setRituais] = useState(() => {
+    const saved = localStorage.getItem('inn_rituais');
+    return saved ? JSON.parse(saved) : INIT_RIT;
+  });
   const [expanded, setExpanded] = useState(null);
   const [editingNota, setEditingNota] = useState(null);
   const [notaText, setNotaText] = useState('');
+
+  React.useEffect(() => {
+    localStorage.setItem('inn_rituais', JSON.stringify(rituais));
+  }, [rituais]);
 
   const toggle = (id) => setExpanded(prev => prev === id ? null : id);
 
