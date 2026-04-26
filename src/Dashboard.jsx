@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Users, Zap, Loader, DollarSign, Calendar, TrendingUp } from 'lucide-react';
+import { Users, Zap, Loader, DollarSign, Calendar } from 'lucide-react';
 import KPICard from './KPICard';
-import { COMPROMISSOS, FINANCEIRO, STATUS_CONFIG } from './data';
+import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
 
 function StatusBadge({ status }) {
@@ -19,6 +19,7 @@ export default function Dashboard({ onNavigate }) {
 
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ activeClients: 0, activeAuto: 0, implantando: 0, mrr: 0, totalRecebidoImpl: 0, automacoes: [] });
+  const [ideias, setIdeias] = useState([]);
 
   React.useEffect(() => {
     async function loadStats() {
@@ -38,6 +39,9 @@ export default function Dashboard({ onNavigate }) {
         const totalRecebidoImpl = automacoes.filter(a => a.pago).reduce((acc, a) => acc + (a.valor_impl || 0), 0);
 
         setStats({ activeClients, activeAuto, implantando, mrr, totalRecebidoImpl, automacoes });
+
+        const { data: idData } = await supabase.from('inn_ideias').select('titulo, status, prioridade').order('created_at', { ascending: false }).limit(5);
+        setIdeias(idData || []);
       } catch (err) {
         console.error(err);
       }
@@ -46,19 +50,7 @@ export default function Dashboard({ onNavigate }) {
     loadStats();
   }, []);
 
-  // Próximos 7 dias
-  const upcomingDays = 7;
-  const upcoming = COMPROMISSOS.filter(c => {
-    const diff = (new Date(c.data) - today) / 86400000;
-    return diff >= 0 && diff <= upcomingDays;
-  }).sort((a, b) => new Date(a.data) - new Date(b.data));
-
-  const tipoColors = {
-    'Reunião Cliente': '#00FFB2',
-    'Interna': '#60A5FA',
-    'Entrega': '#FFB800',
-    'Outro': '#94A3B8',
-  };
+  const PRIORIDADE_COLORS = { Alta: '#EF4444', Média: '#FBBF24', Baixa: '#3B82F6' };
 
   return (
     <div>
@@ -130,9 +122,9 @@ export default function Dashboard({ onNavigate }) {
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '12px 16px',
                       background: 'rgba(255,255,255,0.02)',
-                      border: `1px solid ${cfg.color}25`,
+                      border: `1px solid ${(cfg.color || '#333')}25`,
                       borderRadius: 10,
-                      borderLeft: `3px solid ${cfg.color}`,
+                      borderLeft: `3px solid ${cfg.color || '#333'}`,
                       gap: 12,
                     }}>
                       <div style={{ flexGrow: 1, minWidth: 0 }}>
@@ -168,32 +160,27 @@ export default function Dashboard({ onNavigate }) {
         {/* Right */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-          {/* Próximos Compromissos */}
+          {/* Últimas Ideias do Backlog */}
           <div className="card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div style={{ fontSize: '0.875rem', fontWeight: 700 }}>Próximos Compromissos</div>
+              <div style={{ fontSize: '0.875rem', fontWeight: 700 }}>Ideias Recentes (Backlog)</div>
               <Calendar size={16} color="var(--text-2)" />
             </div>
-            {upcoming.length > 0 ? (
+            {loading ? (
+              <div style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Carregando...</div>
+            ) : ideias.length === 0 ? (
+              <div style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Nenhuma ideia no backlog ainda.</div>
+            ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {upcoming.map(c => (
-                  <div key={c.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                    <div style={{
-                      width: 3, borderRadius: 99, marginTop: 4, flexShrink: 0,
-                      background: tipoColors[c.tipo] || '#94A3B8',
-                      alignSelf: 'stretch',
-                    }} />
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 2 }}>{c.titulo}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
-                        {new Date(c.data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })} · {c.hora}
-                      </div>
-                    </div>
+                {ideias.map(i => (
+                  <div key={i.titulo + i.status} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.titulo}</div>
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${PRIORIDADE_COLORS[i.prioridade] || '#333'}20`, color: PRIORIDADE_COLORS[i.prioridade] || '#999', whiteSpace: 'nowrap' }}>
+                      {i.prioridade}
+                    </span>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Nenhum compromisso nos próximos 7 dias.</div>
             )}
           </div>
 

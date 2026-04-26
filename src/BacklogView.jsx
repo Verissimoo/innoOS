@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, X, Check, Edit2, Download, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, X, Check, Edit2, Download, ArrowRight, Trash2 } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
 
@@ -21,7 +21,7 @@ export default function BacklogView({ onSelectIdeia }) {
   const [automacoes, setAutomacoes] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  React.useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   async function fetchAll() {
     setLoading(true);
@@ -127,6 +127,13 @@ export default function BacklogView({ onSelectIdeia }) {
     }).eq('id', editCard);
     if (error) console.error(error);
     setEditCard(null);
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Tem certeza que deseja excluir esta ideia?')) return;
+    const { error } = await supabase.from('inn_ideias').delete().eq('id', id);
+    if (error) { alert('Erro ao excluir: ' + error.message); return; }
+    setIdeias(prev => prev.filter(i => i.id !== id));
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-2)' }}>Carregando dados...</div>;
@@ -264,16 +271,26 @@ export default function BacklogView({ onSelectIdeia }) {
                           position: 'relative'
                         }}
                       >
-                        {/* Hover Edit Button */}
+                        {/* Hover Buttons */}
                         {hoveredCard === card.id && (
-                          <button 
-                            className="btn btn-ghost" 
-                            style={{ position: 'absolute', top: 8, right: 8, padding: 4, background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-                            onClick={(e) => { e.stopPropagation(); startEdit(card); }}
-                            title="Editar"
-                          >
-                            <Edit2 size={12} color="var(--text-2)" />
-                          </button>
+                          <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4 }}>
+                            <button 
+                              className="btn btn-ghost" 
+                              style={{ padding: 4, background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+                              onClick={(e) => { e.stopPropagation(); startEdit(card); }}
+                              title="Editar"
+                            >
+                              <Edit2 size={12} color="var(--text-2)" />
+                            </button>
+                            <button 
+                              className="btn btn-ghost" 
+                              style={{ padding: 4, background: 'var(--bg-card)', border: '1px solid var(--border)', color: '#EF4444' }}
+                              onClick={(e) => { e.stopPropagation(); handleDelete(card.id); }}
+                              title="Excluir"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         )}
 
                         {/* Tipo */}
