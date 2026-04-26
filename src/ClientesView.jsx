@@ -310,6 +310,15 @@ export default function ClientesView() {
                   </div>
                 </div>
                 <div className="form-group">
+                  <label className="form-label">Status</label>
+                  <select className="form-select" value={editData.status} onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}>
+                    <option>Lead</option>
+                    <option>Ativo</option>
+                    <option>Churn</option>
+                    <option>Pausado</option>
+                  </select>
+                </div>
+                <div className="form-group">
                   <label className="form-label">E-mail</label>
                   <input className="form-input" value={editData.email} onChange={e => setEditData(d => ({ ...d, email: e.target.value }))} />
                 </div>

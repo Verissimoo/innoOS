@@ -25,12 +25,22 @@ export default function BacklogView({ onSelectIdeia }) {
 
   async function fetchAll() {
     setLoading(true);
-    const [ { data: idData }, { data: autData } ] = await Promise.all([
-      supabase.from('inn_ideias').select('*, inn_automacoes(id, nome)').order('created_at', { ascending: false }),
+    const [ { data: idData, error: idErr }, { data: autData } ] = await Promise.all([
+      supabase.from('inn_ideias').select('*').order('created_at', { ascending: false }),
       supabase.from('inn_automacoes').select('id, nome').order('nome')
     ]);
-    setIdeias(idData || []);
-    setAutomacoes(autData || []);
+    
+    if (idErr) console.error("Erro ao buscar ideias:", idErr);
+    
+    const automacoesList = autData || [];
+    const mappedIdeias = (idData || []).map(ideia => {
+      const autId = ideia.extra_info?.automacao_id;
+      const aut = automacoesList.find(a => a.id === autId);
+      return { ...ideia, inn_automacoes: aut ? { id: aut.id, nome: aut.nome } : null };
+    });
+
+    setIdeias(mappedIdeias);
+    setAutomacoes(automacoesList);
     setLoading(false);
   }
   const [modal, setModal] = useState(false);
@@ -72,14 +82,20 @@ export default function BacklogView({ onSelectIdeia }) {
       prioridade: form.prioridade,
       status: 'Ideia',
       prox_passos: form.prox_passos,
-      automacao_id: form.automacao_id || null,
+      extra_info: { automacao_id: form.automacao_id || null }
     };
-    const { data, error } = await supabase.from('inn_ideias').insert([payload]).select('*, inn_automacoes(id, nome)').single();
+    const { data, error } = await supabase.from('inn_ideias').insert([payload]).select().single();
     if (error) {
       console.error(error);
-      alert("Erro ao salvar. Tente novamente.");
+      alert("Erro ao salvar: " + error.message);
       return;
     }
+    
+    // Vincula em memória para a interface
+    const autId = data.extra_info?.automacao_id;
+    const aut = automacoes.find(a => a.id === autId);
+    data.inn_automacoes = aut ? { id: aut.id, nome: aut.nome } : null;
+
     setIdeias(prev => [data, ...prev]);
     setModal(false);
     setForm(emptyForm);
@@ -115,17 +131,21 @@ export default function BacklogView({ onSelectIdeia }) {
   };
 
   // Edit inline
-  const startEdit = (card) => { setEditCard(card.id); setEditForm({ ...card }); };
+  const startEdit = (card) => { setEditCard(card.id); setEditForm({ ...card, automacao_id: card.extra_info?.automacao_id || '' }); };
   async function saveEdit() {
-    setIdeias(prev => prev.map(i => i.id === editCard ? { ...i, ...editForm, inn_automacoes: automacoes.find(a => a.id === editForm.automacao_id) || null } : i));
+    const currentIdeia = ideias.find(i => i.id === editCard);
+    const newExtraInfo = { ...(currentIdeia.extra_info || {}), automacao_id: editForm.automacao_id || null };
+
+    setIdeias(prev => prev.map(i => i.id === editCard ? { ...i, ...editForm, extra_info: newExtraInfo, inn_automacoes: automacoes.find(a => a.id === editForm.automacao_id) || null } : i));
+    
     const { error } = await supabase.from('inn_ideias').update({
       titulo: editForm.titulo,
       descricao: editForm.descricao,
       prioridade: editForm.prioridade,
       prox_passos: editForm.prox_passos,
-      automacao_id: editForm.automacao_id || null,
+      extra_info: newExtraInfo,
     }).eq('id', editCard);
-    if (error) console.error(error);
+    if (error) { alert("Erro ao editar: " + error.message); console.error(error); }
     setEditCard(null);
   }
 
