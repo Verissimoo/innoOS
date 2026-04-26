@@ -204,6 +204,7 @@ export default function ClientesView() {
                   <div className="form-group">
                     <label className="form-label">Status</label>
                     <select className="form-select" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                      <option>Ideia</option>
                       <option>Lead</option>
                       <option>Ativo</option>
                       <option>Churn</option>
@@ -311,7 +312,8 @@ export default function ClientesView() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Status</label>
-                  <select className="form-select" value={editData.status} onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}>
+                  <select className="form-select" value={editData.status || 'Lead'} onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}>
+                    <option>Ideia</option>
                     <option>Lead</option>
                     <option>Ativo</option>
                     <option>Churn</option>
