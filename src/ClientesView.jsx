@@ -272,8 +272,10 @@ export default function ClientesView() {
               <button className="btn btn-primary" onClick={saveEdit}><Save size={15} />Salvar</button>
             </>
           ) : (
-            <button className="btn btn-ghost" onClick={() => setEditMode(true)}><Edit2 size={15} />Editar</button>
-            <button className="btn btn-ghost" style={{ color: '#EF4444' }} onClick={deleteClient}><Trash2 size={15} />Excluir</button>
+            <>
+              <button className="btn btn-ghost" onClick={() => setEditMode(true)}><Edit2 size={15} />Editar</button>
+              <button className="btn btn-ghost" style={{ color: '#EF4444' }} onClick={deleteClient}><Trash2 size={15} />Excluir</button>
+            </>
           )}
         </div>
       </div>
