@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Edit2, Save, X, MessageSquare, Calendar, DollarSign, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Edit2, Save, X, MessageSquare, Calendar, DollarSign, Check, Trash2 } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
 
@@ -68,6 +68,17 @@ export default function ClientesView() {
     setClientes(prev => prev.map(c => c.id === selected.id ? { ...c, ...editData } : c));
     setSelected({ ...selected, ...editData });
     setEditMode(false);
+  };
+
+  const deleteClient = async () => {
+    if (!window.confirm('Tem certeza que deseja excluir este cliente? Todas as automações vinculadas a ele ficarão órfãs.')) return;
+    const { error } = await supabase.from('inn_clientes').delete().eq('id', selected.id);
+    if (error) {
+      alert('Erro ao excluir cliente: ' + error.message);
+      return;
+    }
+    setClientes(prev => prev.filter(c => c.id !== selected.id));
+    setSelected(null);
   };
 
   const addNota = async () => {
@@ -262,6 +273,7 @@ export default function ClientesView() {
             </>
           ) : (
             <button className="btn btn-ghost" onClick={() => setEditMode(true)}><Edit2 size={15} />Editar</button>
+            <button className="btn btn-ghost" style={{ color: '#EF4444' }} onClick={deleteClient}><Trash2 size={15} />Excluir</button>
           )}
         </div>
       </div>

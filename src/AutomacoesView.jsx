@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check, Bot, LayoutDashboard, Globe } from 'lucide-react';
+import { Plus, X, Edit2, Check, Bot, LayoutDashboard, Globe, Trash2 } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
 
@@ -108,14 +108,51 @@ export default function AutomacoesView({ onSelectAutomacao }) {
       pago: form.pago || false,
     };
     
-    const { data, error } = await supabase.from('inn_automacoes').insert([payload]).select('*, inn_clientes(id, nome)').single();
-    if (error) { console.error('Erro ao salvar:', error); return; }
+    if (editId) {
+      const { data, error } = await supabase.from('inn_automacoes').update(payload).eq('id', editId).select('*, inn_clientes(id, nome)').single();
+      if (error) { console.error('Erro ao atualizar:', error); return; }
+      setAutomacoes(prev => prev.map(a => a.id === editId ? data : a));
+    } else {
+      const { data, error } = await supabase.from('inn_automacoes').insert([payload]).select('*, inn_clientes(id, nome)').single();
+      if (error) { console.error('Erro ao salvar:', error); return; }
+      setAutomacoes(prev => [data, ...prev]);
+    }
     
-    setAutomacoes(prev => [data, ...prev]);
     setModal(false);
     setForm(emptyForm);
     setIsAddingClient(false);
+    setEditId(null);
     setErrors({});
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Tem certeza que deseja excluir esta automação? Todos os dados (tarefas e notas) vinculados a ela serão perdidos.')) return;
+    const { error } = await supabase.from('inn_automacoes').delete().eq('id', id);
+    if (error) {
+      alert('Erro ao excluir automação: ' + error.message);
+      return;
+    }
+    setAutomacoes(prev => prev.filter(a => a.id !== id));
+  }
+
+  function handleEdit(a) {
+    setForm({
+      nome: a.nome || '',
+      categoria: a.categoria || '',
+      tipo: a.tipo || 'Agente de IA',
+      status: a.status || 'Ideia',
+      cliente: a.cliente_id ? a.cliente_id.toString() : '',
+      descricao: a.descricao || '',
+      stack: a.stack || [],
+      stackInput: '',
+      valorImpl: a.valor_impl || '',
+      valorMensal: a.valor_mensal || '',
+      dataInicio: a.data_inicio || '',
+      observacoes: a.observacoes || '',
+      pago: a.pago || false,
+    });
+    setEditId(a.id);
+    setModal(true);
   }
 
   const addStackTag = (tag) => {
@@ -162,7 +199,7 @@ export default function AutomacoesView({ onSelectAutomacao }) {
           <h1 className="page-title">Automações e Sistemas</h1>
           <p className="page-subtitle">Gerencie projetos ativos, portfólio e sistemas entregues</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm(emptyForm); setModal(true); }}>
+        <button className="btn btn-primary" onClick={() => { setForm(emptyForm); setEditId(null); setModal(true); }}>
           <Plus size={16} /> Nova Automação
         </button>
       </div>
@@ -272,9 +309,17 @@ export default function AutomacoesView({ onSelectAutomacao }) {
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
                     {a.data_inicio ? `Início: ${new Date(a.data_inicio + 'T12:00').toLocaleDateString('pt-BR')}` : 'Sem data de início'}
                   </div>
-                  <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '0.8rem' }} onClick={(e) => { e.stopPropagation(); handleSelect(a); }}>
-                    Ver projeto →
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost" style={{ padding: '6px' }} onClick={(e) => { e.stopPropagation(); handleEdit(a); }}>
+                      <Edit2 size={14} />
+                    </button>
+                    <button className="btn btn-ghost" style={{ padding: '6px', color: '#EF4444' }} onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }}>
+                      <Trash2 size={14} />
+                    </button>
+                    <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '0.8rem' }} onClick={(e) => { e.stopPropagation(); handleSelect(a); }}>
+                      Ver projeto →
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -287,7 +332,7 @@ export default function AutomacoesView({ onSelectAutomacao }) {
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">Nova Automação</span>
+              <span className="modal-title">{editId ? 'Editar Automação' : 'Nova Automação'}</span>
               <button className="modal-close" onClick={() => setModal(false)}><X size={18} /></button>
             </div>
             <div className="modal-body">
@@ -450,7 +495,7 @@ export default function AutomacoesView({ onSelectAutomacao }) {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setModal(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={handleSave}><Check size={16} /> Salvar Automação</button>
+              <button className="btn btn-primary" onClick={handleSave}><Check size={16} /> {editId ? 'Salvar Alterações' : 'Salvar Automação'}</button>
             </div>
           </div>
         </div>
