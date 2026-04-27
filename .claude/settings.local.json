@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs cat *)",
+      "Bash(npx vite *)",
+      "Bash(npx esbuild *)",
+      "Bash(curl -sS \"http://localhost:5173/src/ClientesView.jsx\")"
+    ]
+  }
+}

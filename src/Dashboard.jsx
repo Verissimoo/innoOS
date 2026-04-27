@@ -31,7 +31,7 @@ export default function Dashboard({ onNavigate }) {
         ]);
         const clientes = clis || [];
         const automacoes = auts || [];
-        
+
         const activeClients = clientes.filter(c => c.status === 'Ativo').length;
         const activeAuto = automacoes.filter(a => a.status === 'Ativa').length;
         const implantando = automacoes.filter(a => a.status === 'Em Implantação').length;
@@ -40,12 +40,13 @@ export default function Dashboard({ onNavigate }) {
 
         setStats({ activeClients, activeAuto, implantando, mrr, totalRecebidoImpl, automacoes });
 
-        const { data: idData } = await supabase.from('inn_ideias').select('titulo, status, prioridade').order('created_at', { ascending: false }).limit(5);
+        const { data: idData } = await supabase.from('inn_ideias').select('id, titulo, status, prioridade').order('created_at', { ascending: false }).limit(5);
         setIdeias(idData || []);
       } catch (err) {
         console.error(err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     loadStats();
   }, []);
@@ -173,7 +174,7 @@ export default function Dashboard({ onNavigate }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {ideias.map(i => (
-                  <div key={i.titulo + i.status} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div key={i.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.titulo}</div>
                     <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${PRIORIDADE_COLORS[i.prioridade] || '#333'}20`, color: PRIORIDADE_COLORS[i.prioridade] || '#999', whiteSpace: 'nowrap' }}>
                       {i.prioridade}

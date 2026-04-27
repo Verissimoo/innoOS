@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check, Bot, LayoutDashboard, Globe, Trash2 } from 'lucide-react';
+import { Plus, X, Edit2, Check, Bot, LayoutDashboard, Globe, Trash2, ChevronDown, ChevronRight, DollarSign } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
+import { FORMAS_PAGAMENTO, COBRANCA_ESTAGIOS, TIPO_COBRANCA, ESTAGIO_TO_STATUS } from './constants';
 
 const STATUS_OPTS = ['Todos', 'Ativa', 'Em Implantação', 'Portfólio', 'Ideia', 'Pausada'];
 
@@ -26,6 +27,12 @@ const emptyForm = {
   cliente: '', descricao: '', stack: [], stackInput: '',
   valorImpl: '', valorMensal: '', dataInicio: '', observacoes: '',
   pago: false,
+  // Seção financeira (criação automática de inn_recebimentos)
+  configurarRecebimento: false,
+  tipoCobranca: 'Implantação',
+  formaPagamento: 'PIX',
+  estagioPagamento: 'Aguardando proposta',
+  dataPrevistaPag: '',
 };
 
 export default function AutomacoesView({ onSelectAutomacao }) {
@@ -40,18 +47,26 @@ export default function AutomacoesView({ onSelectAutomacao }) {
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [errors, setErrors] = useState({});
   const [editId, setEditId] = useState(null);
+  const [showFinanceiro, setShowFinanceiro] = useState(false);
 
   React.useEffect(() => { fetchAll(); }, []);
 
   async function fetchAll() {
     setLoading(true);
-    const [{ data: auts }, { data: clis }] = await Promise.all([
-      supabase.from('inn_automacoes').select('*, inn_clientes(id, nome)').order('created_at', { ascending: false }),
-      supabase.from('inn_clientes').select('*').order('nome'),
-    ]);
-    setAutomacoes(auts || []);
-    setClientes(clis || []);
-    setLoading(false);
+    try {
+      const [{ data: auts, error: autsErr }, { data: clis, error: clisErr }] = await Promise.all([
+        supabase.from('inn_automacoes').select('*, inn_clientes(id, nome)').order('created_at', { ascending: false }),
+        supabase.from('inn_clientes').select('*').order('nome'),
+      ]);
+      if (autsErr) console.error('Erro ao buscar automações:', autsErr);
+      if (clisErr) console.error('Erro ao buscar clientes:', clisErr);
+      setAutomacoes(auts || []);
+      setClientes(clis || []);
+    } catch (err) {
+      console.error('Erro ao carregar automações:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   const filtered = automacoes.filter(a => {
@@ -78,11 +93,64 @@ export default function AutomacoesView({ onSelectAutomacao }) {
     return data;
   }
 
+  async function criarRecebimentosAutomatico(automacaoId, clienteId) {
+    const status = ESTAGIO_TO_STATUS[form.estagioPagamento] || 'Pendente';
+    const observacaoEstagio = `Estágio comercial: ${form.estagioPagamento}`;
+    const dataPrevista = form.dataPrevistaPag || null;
+    const dataRecebido = status === 'Pago' ? (form.dataPrevistaPag || new Date().toISOString().slice(0, 10)) : null;
+    const valorImpl = parseFloat(form.valorImpl) || 0;
+    const valorMensal = parseFloat(form.valorMensal) || 0;
+
+    const registros = [];
+    const incluiImpl = (form.tipoCobranca === 'Implantação' || form.tipoCobranca === 'Ambos') && valorImpl > 0;
+    const incluiMensal = (form.tipoCobranca === 'Mensalidade' || form.tipoCobranca === 'Ambos') && valorMensal > 0;
+
+    if (incluiImpl) {
+      registros.push({
+        descricao: `${form.nome} — Implantação`,
+        tipo: 'Implantação',
+        valor: valorImpl,
+        parcelas: form.estagioPagamento === 'Parcelado' ? 2 : 1,
+        parcela_atual: 1,
+        forma_pagamento: form.formaPagamento,
+        status,
+        data_prevista: dataPrevista,
+        data_recebido: dataRecebido,
+        cliente_id: clienteId,
+        automacao_id: automacaoId,
+        observacoes: observacaoEstagio
+      });
+    }
+    if (incluiMensal) {
+      registros.push({
+        descricao: `${form.nome} — Mensalidade`,
+        tipo: 'Mensalidade',
+        valor: valorMensal,
+        parcelas: 1,
+        parcela_atual: 1,
+        forma_pagamento: form.formaPagamento,
+        status,
+        data_prevista: dataPrevista,
+        data_recebido: dataRecebido,
+        cliente_id: clienteId,
+        automacao_id: automacaoId,
+        observacoes: observacaoEstagio
+      });
+    }
+
+    if (registros.length === 0) return;
+    const { error } = await supabase.from('inn_recebimentos').insert(registros);
+    if (error) {
+      console.error('Erro ao criar recebimento(s):', error);
+      alert('Automação salva, mas falhou ao criar recebimento(s) em Financeiro: ' + error.message);
+    }
+  }
+
   async function handleSave() {
     if (!validate()) return;
-    
+
     let clienteId = form.cliente || null;
-    
+
     if (isAddingClient && form.newClienteName?.trim()) {
       const novoClienteObj = {
         nome: form.newClienteName.trim()
@@ -107,17 +175,24 @@ export default function AutomacoesView({ onSelectAutomacao }) {
       observacoes: form.observacoes,
       pago: form.pago || false,
     };
-    
+
+    let automacaoSalva = null;
     if (editId) {
       const { data, error } = await supabase.from('inn_automacoes').update(payload).eq('id', editId).select('*, inn_clientes(id, nome)').single();
-      if (error) { console.error('Erro ao atualizar:', error); return; }
+      if (error) { console.error('Erro ao atualizar:', error); alert('Erro ao atualizar: ' + error.message); return; }
       setAutomacoes(prev => prev.map(a => a.id === editId ? data : a));
+      automacaoSalva = data;
     } else {
       const { data, error } = await supabase.from('inn_automacoes').insert([payload]).select('*, inn_clientes(id, nome)').single();
-      if (error) { console.error('Erro ao salvar:', error); return; }
+      if (error) { console.error('Erro ao salvar:', error); alert('Erro ao salvar: ' + error.message); return; }
       setAutomacoes(prev => [data, ...prev]);
+      automacaoSalva = data;
     }
-    
+
+    if (form.configurarRecebimento && automacaoSalva) {
+      await criarRecebimentosAutomatico(automacaoSalva.id, clienteId);
+    }
+
     setModal(false);
     setForm(emptyForm);
     setIsAddingClient(false);
@@ -150,6 +225,11 @@ export default function AutomacoesView({ onSelectAutomacao }) {
       dataInicio: a.data_inicio || '',
       observacoes: a.observacoes || '',
       pago: a.pago || false,
+      configurarRecebimento: false,
+      tipoCobranca: 'Implantação',
+      formaPagamento: 'PIX',
+      estagioPagamento: 'Aguardando proposta',
+      dataPrevistaPag: '',
     });
     setEditId(a.id);
     setModal(true);
@@ -485,6 +565,96 @@ export default function AutomacoesView({ onSelectAutomacao }) {
                 <label className="form-label">Data de Início</label>
                 <input className="form-input" type="date"
                   value={form.dataInicio} onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value }))} />
+              </div>
+
+              {/* ============== SEÇÃO FINANCEIRO (colapsável) ============== */}
+              <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowFinanceiro(s => !s)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '12px 16px', background: 'rgba(255,255,255,0.02)', border: 'none',
+                    color: 'var(--text-1)', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <DollarSign size={15} color="var(--primary)" /> Financeiro
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-2)', fontWeight: 400 }}>
+                      (configurar recebimento agora?)
+                    </span>
+                  </span>
+                  {showFinanceiro ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </button>
+
+                {showFinanceiro && (
+                  <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.85rem', marginBottom: form.configurarRecebimento ? 16 : 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={form.configurarRecebimento}
+                        onChange={e => setForm(f => ({ ...f, configurarRecebimento: e.target.checked }))}
+                        style={{ width: 16, height: 16 }}
+                      />
+                      <span style={{ color: form.configurarRecebimento ? 'var(--primary)' : 'var(--text-2)' }}>
+                        Configurar recebimento agora?
+                      </span>
+                    </label>
+
+                    {form.configurarRecebimento && (
+                      <>
+                        {editId && (
+                          <div style={{
+                            padding: '8px 12px', marginBottom: 12,
+                            background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)',
+                            borderRadius: 6, fontSize: '0.78rem', color: '#FBBF24'
+                          }}>
+                            ⚠ Será criado um novo registro em Financeiro ao salvar.
+                          </div>
+                        )}
+
+                        <div className="form-row">
+                          <div className="form-group">
+                            <label className="form-label">Tipo de cobrança</label>
+                            <select className="form-select" value={form.tipoCobranca}
+                              onChange={e => setForm(f => ({ ...f, tipoCobranca: e.target.value }))}>
+                              {TIPO_COBRANCA.map(t => <option key={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">Forma de pagamento</label>
+                            <select className="form-select" value={form.formaPagamento}
+                              onChange={e => setForm(f => ({ ...f, formaPagamento: e.target.value }))}>
+                              {FORMAS_PAGAMENTO.map(fp => <option key={fp}>{fp}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="form-row">
+                          <div className="form-group">
+                            <label className="form-label">Status do pagamento</label>
+                            <select className="form-select" value={form.estagioPagamento}
+                              onChange={e => setForm(f => ({ ...f, estagioPagamento: e.target.value }))}>
+                              {COBRANCA_ESTAGIOS.map(s => <option key={s}>{s}</option>)}
+                            </select>
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">Data prevista de pagamento</label>
+                            <input className="form-input" type="date"
+                              value={form.dataPrevistaPag}
+                              onChange={e => setForm(f => ({ ...f, dataPrevistaPag: e.target.value }))} />
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-2)', lineHeight: 1.5, padding: 10, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                          {form.tipoCobranca === 'Implantação' && 'Será criado 1 recebimento usando o Valor de Implementação acima.'}
+                          {form.tipoCobranca === 'Mensalidade' && 'Será criado 1 recebimento mensal usando a Recorrência Mensal acima.'}
+                          {form.tipoCobranca === 'Ambos' && 'Serão criados 2 recebimentos: implementação + mensalidade.'}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="form-group">

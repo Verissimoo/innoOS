@@ -13,11 +13,11 @@ const emptyClientForm = {
   observacoes: '', status: 'Lead'
 };
 
-export default function ClientesView() {
+export default function ClientesView({ clienteInicial, onAbrirAutomacao }) {
   const [clientes, setClientes] = useState([]);
   const [automacoes, setAutomacoes] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [selected, setSelected] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({});
@@ -27,15 +27,31 @@ export default function ClientesView() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  // Abre automaticamente o perfil quando o App pede contexto (volta de uma automação)
+  useEffect(() => {
+    if (clienteInicial) {
+      setSelected(clienteInicial);
+      setEditData({ ...clienteInicial });
+      setEditMode(false);
+    }
+  }, [clienteInicial]);
+
   async function fetchAll() {
     setLoading(true);
-    const [{ data: clis }, { data: auts }] = await Promise.all([
-      supabase.from('inn_clientes').select('*').order('nome'),
-      supabase.from('inn_automacoes').select('*')
-    ]);
-    setClientes(clis || []);
-    setAutomacoes(auts || []);
-    setLoading(false);
+    try {
+      const [{ data: clis, error: clisErr }, { data: auts, error: autsErr }] = await Promise.all([
+        supabase.from('inn_clientes').select('*').order('nome'),
+        supabase.from('inn_automacoes').select('*')
+      ]);
+      if (clisErr) console.error('Erro ao buscar clientes:', clisErr);
+      if (autsErr) console.error('Erro ao buscar automações:', autsErr);
+      setClientes(clis || []);
+      setAutomacoes(auts || []);
+    } catch (err) {
+      console.error('Erro ao carregar clientes:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   const clienteAutos = (id) => automacoes.filter(a => a.cliente_id === id);
@@ -361,23 +377,40 @@ export default function ClientesView() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {autos.map(a => {
                   const cfg = STATUS_CONFIG[a.status] || {};
+                  const handleClickAutomacao = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof onAbrirAutomacao === 'function') {
+                      onAbrirAutomacao(a, selected);
+                    }
+                  };
                   return (
-                    <div key={a.id} style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '12px 14px', background: 'rgba(255,255,255,0.02)',
-                      borderRadius: 10, borderLeft: `3px solid ${cfg.color}`,
-                    }}>
+                    <div
+                      key={a.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={handleClickAutomacao}
+                      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') handleClickAutomacao(ev); }}
+                      className="card hoverable"
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '12px 14px', background: 'rgba(255,255,255,0.02)',
+                        borderRadius: 10, borderLeft: `3px solid ${cfg.color}`,
+                        cursor: 'pointer', userSelect: 'none'
+                      }}
+                    >
                       <div>
                         <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 2 }}>{a.nome}</div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>{a.categoria}</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {a.valorMensal > 0 && (
+                        {a.valor_mensal > 0 && (
                           <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)' }}>
-                            R$ {a.valorMensal}/mês
+                            R$ {a.valor_mensal.toLocaleString('pt-BR')}/mês
                           </div>
                         )}
                         <Badge status={a.status} />
+                        <span style={{ color: 'var(--text-2)', fontSize: '1rem' }}>›</span>
                       </div>
                     </div>
                   );

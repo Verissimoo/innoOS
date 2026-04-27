@@ -9,6 +9,8 @@ import AgendaRituaisView from './AgendaRituaisView';
 import BacklogView from './BacklogView';
 import ProjetoDetalheView from './ProjetoDetalheView';
 import IdeiaDetalheView from './IdeiaDetalheView';
+import FinanceiroView from './FinanceiroView';
+import ProcessosView from './ProcessosView';
 import { CURRENT_USER } from './data';
 import { supabase } from './lib/supabase';
 
@@ -16,32 +18,35 @@ export default function App() {
   const [section, setSection] = useState('dashboard');
   const [selectedAutomacao, setSelectedAutomacao] = useState(null);
   const [selectedIdeia, setSelectedIdeia] = useState(null);
+  // Quando o usuário entra em uma automação a partir do perfil de um cliente,
+  // guardamos o cliente aqui para reabrir o perfil ao voltar.
+  const [voltarParaCliente, setVoltarParaCliente] = useState(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
   const searchRef = useRef(null);
 
   useEffect(() => {
-    if (query.length > 1) {
-      const searchAll = async () => {
-        try {
-          const [{ data: auts }, { data: clis }, { data: ids }] = await Promise.all([
-            supabase.from('inn_automacoes').select('nome').ilike('nome', `%${query}%`).limit(3),
-            supabase.from('inn_clientes').select('nome').ilike('nome', `%${query}%`).limit(3),
-            supabase.from('inn_ideias').select('titulo').ilike('titulo', `%${query}%`).limit(3)
-          ]);
-          const a = (auts || []).map(x => ({ label: x.nome, type: 'Automação', tab: 'automacoes' }));
-          const c = (clis || []).map(x => ({ label: x.nome, type: 'Cliente', tab: 'clientes' }));
-          const i = (ids || []).map(x => ({ label: x.titulo, type: 'Ideia', tab: 'backlog' }));
-          setResults([...a, ...c, ...i].slice(0, 6));
-        } catch (err) {
-          console.error(err);
-        }
-      };
-      searchAll();
-    } else {
+    if (query.length <= 1) {
       setResults([]);
+      return;
     }
+    const timer = setTimeout(async () => {
+      try {
+        const [{ data: auts }, { data: clis }, { data: ids }] = await Promise.all([
+          supabase.from('inn_automacoes').select('nome').ilike('nome', `%${query}%`).limit(3),
+          supabase.from('inn_clientes').select('nome').ilike('nome', `%${query}%`).limit(3),
+          supabase.from('inn_ideias').select('titulo').ilike('titulo', `%${query}%`).limit(3)
+        ]);
+        const a = (auts || []).map(x => ({ label: x.nome, type: 'Automação', tab: 'automacoes' }));
+        const c = (clis || []).map(x => ({ label: x.nome, type: 'Cliente', tab: 'clientes' }));
+        const i = (ids || []).map(x => ({ label: x.titulo, type: 'Ideia', tab: 'backlog' }));
+        setResults([...a, ...c, ...i].slice(0, 6));
+      } catch (err) {
+        console.error(err);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
   }, [query]);
 
   useEffect(() => {
@@ -58,6 +63,7 @@ export default function App() {
     setSection(tab);
     setSelectedAutomacao(null);
     setSelectedIdeia(null);
+    setVoltarParaCliente(null);
   };
 
   const handleResultClick = (tab) => {
@@ -66,20 +72,48 @@ export default function App() {
     setShowSearch(false);
   };
 
+  // Abre uma automação a partir do perfil de um cliente — preserva o contexto.
+  const abrirAutomacaoDeCliente = (automacao, cliente) => {
+    setVoltarParaCliente(cliente);
+    setSelectedAutomacao(automacao);
+    setSection('automacoes');
+  };
+
   const renderPage = () => {
-    if (section === 'automacoes' && selectedAutomacao) {
-      return <ProjetoDetalheView projeto={selectedAutomacao} onBack={() => setSelectedAutomacao(null)} />;
-    }
-    if (section === 'backlog' && selectedIdeia) {
+    // IdeiaDetalheView tem prioridade: pode ser aberta de dentro do BacklogView OU do ProjetoDetalheView
+    if (selectedIdeia) {
       return <IdeiaDetalheView ideia={selectedIdeia} onBack={() => setSelectedIdeia(null)} />;
+    }
+
+    if (section === 'automacoes' && selectedAutomacao) {
+      const veioDeCliente = !!voltarParaCliente;
+      const handleBack = () => {
+        if (veioDeCliente) {
+          setSelectedAutomacao(null);
+          setSection('clientes');
+          // mantém voltarParaCliente para o ClientesView reabrir o perfil
+        } else {
+          setSelectedAutomacao(null);
+        }
+      };
+      return (
+        <ProjetoDetalheView
+          projeto={selectedAutomacao}
+          onBack={handleBack}
+          backLabel={veioDeCliente ? `Voltar para ${voltarParaCliente.nome}` : 'Voltar para Automações'}
+          onSelectIdeia={setSelectedIdeia}
+        />
+      );
     }
 
     const pages = {
       dashboard: <Dashboard onNavigate={handleNavigation} />,
       automacoes: <AutomacoesView onSelectAutomacao={setSelectedAutomacao} />,
-      clientes: <ClientesView />,
+      clientes: <ClientesView clienteInicial={voltarParaCliente} onAbrirAutomacao={abrirAutomacaoDeCliente} />,
       agenda: <AgendaRituaisView />,
       backlog: <BacklogView onSelectIdeia={setSelectedIdeia} />,
+      processos: <ProcessosView />,
+      financeiro: <FinanceiroView />,
     };
     return pages[section] || pages.dashboard;
   };

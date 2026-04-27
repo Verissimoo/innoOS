@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Edit2, Archive, Check, Plus, Clock, X, Save } from 'lucide-react';
+import { ArrowLeft, Edit2, Check, X, Save, Plus } from 'lucide-react';
 import { STATUS_CONFIG } from './data';
 import { supabase } from './lib/supabase';
+import BacklogKanban from './BacklogKanban';
 
 function Badge({ status }) {
   const cfg = STATUS_CONFIG[status] || { bg: '#333', color: '#fff' };
@@ -24,7 +25,7 @@ const FASES = [
   { id: 5, nome: 'Ativo' },
 ];
 
-export default function ProjetoDetalheView({ projeto, onBack }) {
+export default function ProjetoDetalheView({ projeto, onBack, onSelectIdeia, backLabel }) {
   const [localStatus, setLocalStatus] = useState(projeto.status);
 
   // Determine current phase
@@ -52,11 +53,9 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     }
   }
 
-  // Kanban State
-  const [tarefas, setTarefas] = useState([]);
-  const [showTaskForm, setShowTaskForm] = useState(false);
-  const [taskForm, setTaskForm] = useState({ titulo: '', prioridade: 'Média', responsavel: '', horas: '' });
-  
+  // Backlog interno (inn_ideias filtrado por automacao_id)
+  const [ideias, setIdeias] = useState([]);
+
   // Notas State
   const [notas, setNotas] = useState([]);
   const [notaInput, setNotaInput] = useState('');
@@ -64,7 +63,7 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
   // Checklist State
   const [checklist, setChecklist] = useState([]);
   const [newCheckItem, setNewCheckItem] = useState('');
-  
+
   // Detalhes Editáveis
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -74,7 +73,7 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     valor_mensal: projeto.valor_mensal || 0,
     stack: projeto.stack ? projeto.stack.join(', ') : ''
   });
-  
+
   const DEFAULT_CHECKLIST = [
     'Briefing documentado',
     'Proposta aprovada pelo cliente',
@@ -84,14 +83,15 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     'Documentação entregue'
   ];
 
-  // Drag state
-  const [draggedTask, setDraggedTask] = useState(null);
-
   // Effects
   React.useEffect(() => {
-    supabase.from('inn_tarefas').select('*').eq('automacao_id', projeto.id).order('ordem').then(({ data }) => setTarefas(data || []));
+    supabase.from('inn_ideias').select('*').eq('automacao_id', projeto.id).order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) console.error('Erro ao buscar ideias do projeto:', error);
+        setIdeias(data || []);
+      });
     supabase.from('inn_notas').select('*').eq('automacao_id', projeto.id).order('created_at', { ascending: false }).then(({ data }) => setNotas(data || []));
-    
+
     supabase.from('inn_checklist').select('*').eq('automacao_id', projeto.id).order('ordem').then(async ({ data }) => {
       if (!data || data.length === 0) {
         const items = DEFAULT_CHECKLIST.map((item, i) => ({ automacao_id: projeto.id, item, concluido: false, ordem: i }));
@@ -103,42 +103,41 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     });
   }, [projeto.id]);
 
-  // Handlers Kanban
-  async function handleAddTask() {
-    if (!taskForm.titulo) return;
-    const payload = { ...taskForm, status: 'A fazer', automacao_id: projeto.id, ordem: tarefas.length };
-    const { data, error } = await supabase.from('inn_tarefas').insert([payload]).select().single();
+  // Handlers do BacklogKanban (operam sobre inn_ideias)
+  async function handleIdeiaCreate(payload) {
+    const { data, error } = await supabase.from('inn_ideias').insert([payload]).select().single();
     if (error) {
       console.error(error);
-      alert("Erro ao salvar. Tente novamente.");
-      return;
+      alert('Erro ao criar item: ' + error.message);
+      return false;
     }
-    if (data) setTarefas(prev => [...prev, data]);
-    setTaskForm({ titulo: '', prioridade: 'Média', responsavel: '', horas: '' });
-    setShowTaskForm(false);
+    setIdeias(prev => [data, ...prev]);
+    return true;
   }
 
-  const handleDragStart = (e, task) => {
-    setDraggedTask(task);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  async function updateTarefaStatus(id, novoStatus) {
-    setTarefas(prev => prev.map(t => t.id === id ? { ...t, status: novoStatus } : t));
-    const { error } = await supabase.from('inn_tarefas').update({ status: novoStatus }).eq('id', id);
+  async function handleIdeiaUpdate(id, payload) {
+    const { data, error } = await supabase.from('inn_ideias').update(payload).eq('id', id).select().single();
     if (error) {
       console.error(error);
-      alert("Erro ao salvar. Tente novamente.");
+      alert('Erro ao atualizar item: ' + error.message);
+      return false;
     }
+    setIdeias(prev => prev.map(i => i.id === id ? data : i));
+    return true;
   }
 
-  const handleDrop = (e, status) => {
-    e.preventDefault();
-    if (draggedTask && draggedTask.status !== status) {
-      updateTarefaStatus(draggedTask.id, status);
-    }
-    setDraggedTask(null);
-  };
+  async function handleIdeiaDelete(id) {
+    if (!window.confirm('Tem certeza que deseja excluir este item?')) return;
+    const { error } = await supabase.from('inn_ideias').delete().eq('id', id);
+    if (error) { alert('Erro ao excluir: ' + error.message); return; }
+    setIdeias(prev => prev.filter(i => i.id !== id));
+  }
+
+  async function handleIdeiaMove(id, novoStatus) {
+    setIdeias(prev => prev.map(i => i.id === id ? { ...i, status: novoStatus } : i));
+    const { error } = await supabase.from('inn_ideias').update({ status: novoStatus }).eq('id', id);
+    if (error) { console.error(error); alert('Erro ao mover: ' + error.message); }
+  }
 
   // Handlers Notas
   async function handleAddNota() {
@@ -198,21 +197,22 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
     }
   }
 
-  // Metrics
-  const tarefasConcluidas = tarefas.filter(t => t.status === 'Concluído').length;
-  const totalTarefas = tarefas.length;
-  const progressoTarefas = totalTarefas === 0 ? 0 : Math.round((tarefasConcluidas / totalTarefas) * 100);
-  
-  const diasDesdeInicio = projeto.data_inicio 
-    ? Math.floor((new Date() - new Date(projeto.data_inicio + 'T12:00')) / (1000 * 60 * 60 * 24)) 
+  // Metrics — agora baseadas em inn_ideias (status = 'Pronto' equivale a concluído)
+  const ideiasConcluidas = ideias.filter(i => i.status === 'Pronto').length;
+  const totalIdeias = ideias.length;
+  const progressoIdeias = totalIdeias === 0 ? 0 : Math.round((ideiasConcluidas / totalIdeias) * 100);
+
+  const diasDesdeInicio = projeto.data_inicio
+    ? Math.floor((new Date() - new Date(projeto.data_inicio + 'T12:00')) / (1000 * 60 * 60 * 24))
     : 0;
 
   return (
     <div>
       {/* Header */}
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button className="btn btn-ghost" onClick={onBack} style={{ padding: '8px' }}>
-          <ArrowLeft size={20} />
+        <button className="btn btn-ghost" onClick={onBack} style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ArrowLeft size={16} />
+          <span style={{ fontSize: '0.82rem' }}>{backLabel || 'Voltar'}</span>
         </button>
         <div style={{ flex: 1 }}>
           {editMode ? (
@@ -293,83 +293,24 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
             </div>
           </div>
 
-          {/* [B] BACKLOG DE TAREFAS */}
+          {/* [B] BACKLOG INTERNO DO PROJETO */}
           <div className="card" style={{ padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Backlog de Tarefas</h3>
-              <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '0.8rem' }} onClick={() => setShowTaskForm(!showTaskForm)}>
-                <Plus size={14} /> Adicionar tarefa
-              </button>
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Backlog do Projeto</h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-2)', marginTop: 4 }}>
+                Itens criados aqui aparecem também no backlog geral. Status: Ideia → Analisando → Desenvolvendo → Pronto.
+              </p>
             </div>
-
-            {showTaskForm && (
-              <div style={{ background: 'rgba(255,255,255,0.02)', padding: 16, borderRadius: 8, marginBottom: 24, border: '1px solid var(--border)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: 12, alignItems: 'end' }}>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Título</label>
-                    <input className="form-input" style={{ padding: '6px 10px', fontSize: '0.85rem' }} value={taskForm.titulo} onChange={e => setTaskForm({...taskForm, titulo: e.target.value})} placeholder="Nova tarefa..." />
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Prioridade</label>
-                    <select className="form-select" style={{ padding: '6px 10px', fontSize: '0.85rem' }} value={taskForm.prioridade} onChange={e => setTaskForm({...taskForm, prioridade: e.target.value})}>
-                      <option>Baixa</option>
-                      <option>Média</option>
-                      <option>Alta</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Responsável</label>
-                    <input className="form-input" style={{ padding: '6px 10px', fontSize: '0.85rem', width: 70, textAlign: 'center' }} maxLength={2} value={taskForm.responsavel} onChange={e => setTaskForm({...taskForm, responsavel: e.target.value.toUpperCase()})} placeholder="Ex: FS" />
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Horas</label>
-                    <input className="form-input" type="number" style={{ padding: '6px 10px', fontSize: '0.85rem', width: 70 }} value={taskForm.horas} onChange={e => setTaskForm({...taskForm, horas: e.target.value})} placeholder="Ex: 2" />
-                  </div>
-                  <button className="btn btn-primary" style={{ padding: '6px 16px', height: 35 }} onClick={handleAddTask}>Salvar</button>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8 }}>
-              {['A fazer', 'Em andamento', 'Concluído'].map(colStatus => (
-                <div 
-                  key={colStatus} 
-                  style={{ flex: 1, minWidth: 220, background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 16, minHeight: 200 }}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => handleDrop(e, colStatus)}
-                >
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 16 }}>
-                    {colStatus} ({tarefas.filter(t => t.status === colStatus).length})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {tarefas.filter(t => t.status === colStatus).map(task => {
-                      const prioColor = task.prioridade === 'Alta' ? '#EF4444' : task.prioridade === 'Média' ? '#FBBF24' : '#3B82F6';
-                      return (
-                        <div 
-                          key={task.id} 
-                          draggable 
-                          onDragStart={(e) => handleDragStart(e, task)}
-                          style={{ background: 'var(--bg-card)', padding: 12, borderRadius: 6, border: '1px solid var(--border)', cursor: 'grab' }}
-                        >
-                          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>{task.titulo}</div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: prioColor }} title={`Prioridade ${task.prioridade}`} />
-                              {task.horas && <span style={{ fontSize: '0.7rem', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 4 }}><Clock size={10} /> {task.horas}h</span>}
-                            </div>
-                            {task.responsavel && (
-                              <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--primary-dim)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', fontWeight: 700 }} title={`Responsável: ${task.responsavel}`}>
-                                {task.responsavel}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <BacklogKanban
+              ideias={ideias}
+              automacoes={[]}
+              automacaoFixa={projeto.id}
+              onCreate={handleIdeiaCreate}
+              onUpdate={handleIdeiaUpdate}
+              onDelete={handleIdeiaDelete}
+              onMove={handleIdeiaMove}
+              onSelectIdeia={onSelectIdeia}
+            />
           </div>
 
           {/* [C] ANOTAÇÕES / LOG DE ATIVIDADE */}
@@ -450,15 +391,15 @@ export default function ProjetoDetalheView({ projeto, onBack }) {
           {/* [E] MÉTRICAS RÁPIDAS */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="card" style={{ padding: 16, textAlign: 'center' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{totalTarefas}</div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-2)', textTransform: 'uppercase', marginTop: 4 }}>Total Tarefas</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{totalIdeias}</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-2)', textTransform: 'uppercase', marginTop: 4 }}>Total Itens</div>
             </div>
             <div className="card" style={{ padding: 16, textAlign: 'center' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--primary)' }}>{tarefasConcluidas}</div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-2)', textTransform: 'uppercase', marginTop: 4 }}>Concluídas</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--primary)' }}>{ideiasConcluidas}</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-2)', textTransform: 'uppercase', marginTop: 4 }}>Prontos</div>
             </div>
             <div className="card" style={{ padding: 16, textAlign: 'center' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{progressoTarefas}%</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{progressoIdeias}%</div>
               <div style={{ fontSize: '0.65rem', color: 'var(--text-2)', textTransform: 'uppercase', marginTop: 4 }}>Progresso</div>
             </div>
             <div className="card" style={{ padding: 16, textAlign: 'center' }}>

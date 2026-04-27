@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Plus, X, ArrowUp, ArrowDown, Check, Edit2, Save } from 'lucide-react';
+import { ArrowLeft, Plus, X, ArrowUp, ArrowDown, Check, Edit2, Save, Trash2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { RESPONSAVEIS, ResponsavelAvatar } from './BacklogKanban';
+
+const DOD_DEFAULT_ITEMS = ['Código revisado', 'Testado em produção', 'Documentado', 'Aprovado pelo responsável'];
 
 function Badge({ status, type }) {
   let bg = '#333';
@@ -143,50 +146,125 @@ export default function IdeiaDetalheView({ ideia, onBack }) {
     addLog(`Recurso (${type}) removido`);
   };
 
-  // [E] Plano de Ação
-  const [passos, setPassos] = useState([]);
-  const [passoForm, setPassoForm] = useState({ titulo: '', responsavel: '', prazo: '' });
-  const [showPassoForm, setShowPassoForm] = useState(false);
+  // [Plano de Ação] – 5 blocos
+  // [A] Descrição detalhada → extra_info.descricao_detalhada
+  const [descDetalhada, setDescDetalhada] = useState(extraInfo.descricao_detalhada || '');
+
+  // [B] Critérios de Aceite → inn_ideia_passos com tipo='criterio'
+  const [criteriosAceite, setCriteriosAceite] = useState([]);
+  const [novoCriterio, setNovoCriterio] = useState('');
+
+  // [C] Subtarefas → inn_ideia_passos com tipo='subtarefa'
+  const [subtarefas, setSubtarefas] = useState([]);
+  const [subtarefaForm, setSubtarefaForm] = useState({ titulo: '', responsavel: '', prazo: '' });
+  const [showSubtarefaForm, setShowSubtarefaForm] = useState(false);
+
+  // [D] Dependências → extra_info.dependencias
+  const [dependencias, setDependencias] = useState(extraInfo.dependencias || '');
+
+  // [E] Definition of Done → extra_info.definition_of_done (objeto { 'item': bool })
+  const [dod, setDod] = useState(extraInfo.definition_of_done || {});
 
   React.useEffect(() => {
-    supabase.from('inn_ideia_passos').select('*').eq('ideia_id', ideia.id).order('ordem').then(({ data }) => setPassos(data || []));
+    supabase.from('inn_ideia_passos').select('*').eq('ideia_id', ideia.id).order('ordem').then(({ data, error }) => {
+      if (error) { console.error('Erro ao carregar passos:', error); return; }
+      const all = data || [];
+      setCriteriosAceite(all.filter(p => p.tipo === 'criterio'));
+      setSubtarefas(all.filter(p => p.tipo === 'subtarefa' || !p.tipo));
+    });
   }, [ideia.id]);
 
-  async function handleAddPasso() {
-    if (!passoForm.titulo) return;
-    const payload = { ...passoForm, ideia_id: ideia.id, ordem: passos.length, concluido: false };
+  // Helper: persiste uma chave em extra_info
+  async function patchExtraInfo(field, value) {
+    const merged = { ...extraInfo, [field]: value };
+    setExtraInfo(merged);
+    const { error } = await supabase.from('inn_ideias').update({ extra_info: merged }).eq('id', ideia.id);
+    if (error) { console.error(error); alert('Erro ao salvar: ' + error.message); }
+  }
+
+  // [B] handlers Critérios de Aceite
+  async function addCriterio() {
+    if (!novoCriterio.trim()) return;
+    const payload = {
+      ideia_id: ideia.id, tipo: 'criterio',
+      titulo: novoCriterio.trim(), concluido: false,
+      ordem: criteriosAceite.length
+    };
     const { data, error } = await supabase.from('inn_ideia_passos').insert([payload]).select().single();
-    if (error) {
-      console.error(error);
-      alert("Erro ao salvar. Tente novamente.");
-      return;
-    }
-    if (data) setPassos(prev => [...prev, data]);
-    setPassoForm({ titulo: '', responsavel: '', prazo: '' });
-    setShowPassoForm(false);
-    addLog('Passo adicionado ao Plano de Ação');
+    if (error) { console.error(error); alert('Erro ao salvar critério: ' + error.message); return; }
+    setCriteriosAceite(prev => [...prev, data]);
+    setNovoCriterio('');
+    addLog('Critério de aceite adicionado');
   }
 
-  async function togglePasso(id) {
-    const atual = passos.find(p => p.id === id)?.concluido;
-    setPassos(prev => prev.map(p => p.id === id ? { ...p, concluido: !atual } : p));
+  async function toggleCriterio(id) {
+    const atual = criteriosAceite.find(c => c.id === id)?.concluido;
+    setCriteriosAceite(prev => prev.map(c => c.id === id ? { ...c, concluido: !atual } : c));
     const { error } = await supabase.from('inn_ideia_passos').update({ concluido: !atual }).eq('id', id);
-    if (error) {
-      console.error(error);
-      alert("Erro ao salvar. Tente novamente.");
-      return;
-    }
-    addLog('Status de um passo alterado');
+    if (error) { console.error(error); alert('Erro ao atualizar: ' + error.message); return; }
+    addLog('Critério de aceite atualizado');
   }
 
-  const movePasso = (index, dir) => {
-    const newPassos = [...passos];
+  async function deleteCriterio(id) {
+    setCriteriosAceite(prev => prev.filter(c => c.id !== id));
+    const { error } = await supabase.from('inn_ideia_passos').delete().eq('id', id);
+    if (error) { console.error(error); alert('Erro ao excluir: ' + error.message); return; }
+    addLog('Critério de aceite removido');
+  }
+
+  // [C] handlers Subtarefas
+  async function addSubtarefa() {
+    if (!subtarefaForm.titulo.trim()) return;
+    const payload = {
+      ideia_id: ideia.id, tipo: 'subtarefa',
+      titulo: subtarefaForm.titulo.trim(),
+      responsavel: subtarefaForm.responsavel || null,
+      prazo: subtarefaForm.prazo || null,
+      concluido: false,
+      ordem: subtarefas.length
+    };
+    const { data, error } = await supabase.from('inn_ideia_passos').insert([payload]).select().single();
+    if (error) { console.error(error); alert('Erro ao salvar subtarefa: ' + error.message); return; }
+    setSubtarefas(prev => [...prev, data]);
+    setSubtarefaForm({ titulo: '', responsavel: '', prazo: '' });
+    setShowSubtarefaForm(false);
+    addLog('Subtarefa adicionada');
+  }
+
+  async function toggleSubtarefa(id) {
+    const atual = subtarefas.find(s => s.id === id)?.concluido;
+    setSubtarefas(prev => prev.map(s => s.id === id ? { ...s, concluido: !atual } : s));
+    const { error } = await supabase.from('inn_ideia_passos').update({ concluido: !atual }).eq('id', id);
+    if (error) { console.error(error); alert('Erro ao atualizar: ' + error.message); return; }
+    addLog('Subtarefa atualizada');
+  }
+
+  async function deleteSubtarefa(id) {
+    setSubtarefas(prev => prev.filter(s => s.id !== id));
+    const { error } = await supabase.from('inn_ideia_passos').delete().eq('id', id);
+    if (error) { console.error(error); alert('Erro ao excluir: ' + error.message); return; }
+    addLog('Subtarefa removida');
+  }
+
+  function moveSubtarefa(index, dir) {
+    const newList = [...subtarefas];
     const target = index + dir;
-    if (target < 0 || target >= newPassos.length) return;
-    [newPassos[index], newPassos[target]] = [newPassos[target], newPassos[index]];
-    setPassos(newPassos);
-    addLog('Ordem dos passos alterada');
-  };
+    if (target < 0 || target >= newList.length) return;
+    [newList[index], newList[target]] = [newList[target], newList[index]];
+    setSubtarefas(newList);
+    addLog('Ordem das subtarefas alterada');
+  }
+
+  // [E] handler Definition of Done
+  async function toggleDoD(item) {
+    const next = { ...dod, [item]: !dod[item] };
+    setDod(next);
+    await patchExtraInfo('definition_of_done', next);
+    addLog(`Definition of Done: ${item}`);
+  }
+
+  const subtarefasConcluidas = subtarefas.filter(s => s.concluido).length;
+  const subtarefasProgresso = subtarefas.length === 0 ? 0 : Math.round((subtarefasConcluidas / subtarefas.length) * 100);
 
   // [F] Riscos
   const [riscos, setRiscos] = useState([]);
@@ -442,60 +520,182 @@ export default function IdeiaDetalheView({ ideia, onBack }) {
           {/* Coluna Esquerda Execução */}
           <div style={{ flex: '2 1 500px', display: 'flex', flexDirection: 'column', gap: 32 }}>
             
-            {/* [E] PLANO DE AÇÃO */}
+            {/* ========= PLANO DE AÇÃO (5 blocos) ========= */}
             <div className="card" style={{ padding: 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ marginBottom: 20 }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Plano de Ação</h3>
-                <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '0.8rem' }} onClick={() => setShowPassoForm(!showPassoForm)}>
-                  <Plus size={14} /> Adicionar passo
-                </button>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-2)', marginTop: 4 }}>Detalhamento completo da atividade</p>
               </div>
 
-              {showPassoForm && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, marginBottom: 16, background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 8, border: '1px solid var(--border)', alignItems: 'end' }}>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Título</label>
-                    <input className="form-input" style={{ padding: '6px 10px', fontSize: '0.8rem' }} value={passoForm.titulo} onChange={e => setPassoForm({...passoForm, titulo: e.target.value})} />
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Responsável</label>
-                    <input className="form-input" style={{ padding: '6px 10px', fontSize: '0.8rem', width: 90 }} value={passoForm.responsavel} onChange={e => setPassoForm({...passoForm, responsavel: e.target.value})} />
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Prazo</label>
-                    <input className="form-input" type="date" style={{ padding: '6px 10px', fontSize: '0.8rem' }} value={passoForm.prazo} onChange={e => setPassoForm({...passoForm, prazo: e.target.value})} />
-                  </div>
-                  <button className="btn btn-primary" style={{ height: 33 }} onClick={handleAddPasso}>Salvar</button>
+              {/* [A] Descrição detalhada */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  A · O que precisa ser feito exatamente?
                 </div>
-              )}
+                <textarea
+                  className="form-textarea"
+                  style={{ minHeight: 150, fontSize: '0.88rem', lineHeight: 1.55 }}
+                  placeholder="Descreva passo a passo, com contexto técnico e de negócio..."
+                  value={descDetalhada}
+                  onChange={e => setDescDetalhada(e.target.value)}
+                  onBlur={() => {
+                    if (descDetalhada !== (extraInfo.descricao_detalhada || '')) {
+                      patchExtraInfo('descricao_detalhada', descDetalhada);
+                      addLog('Descrição detalhada atualizada');
+                    }
+                  }}
+                />
+              </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {passos.length === 0 ? (
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-2)', padding: '10px 0' }}>Nenhum passo no plano de ação.</div>
-                ) : (
-                  passos.map((p, index) => (
-                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--bg-card)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <button style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }} onClick={() => movePasso(index, -1)} disabled={index === 0}><ArrowUp size={14} /></button>
-                        <button style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }} onClick={() => movePasso(index, 1)} disabled={index === passos.length - 1}><ArrowDown size={14} /></button>
-                      </div>
-                      
-                      <div style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => togglePasso(p.id)}>
-                        <div style={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${p.concluido ? 'var(--primary)' : 'var(--border)'}`, background: p.concluido ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {p.concluido && <Check size={14} color="#000" />}
+              {/* [B] Critérios de Aceite */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  B · Critérios de Aceite
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  {criteriosAceite.length === 0 ? (
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-2)', fontStyle: 'italic' }}>O que define que essa atividade está pronta?</div>
+                  ) : criteriosAceite.map(c => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                      <div style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => toggleCriterio(c.id)}>
+                        <div style={{ width: 18, height: 18, borderRadius: 4, border: `1px solid ${c.concluido ? 'var(--primary)' : 'var(--border)'}`, background: c.concluido ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {c.concluido && <Check size={12} color="#000" />}
                         </div>
                       </div>
-
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ fontSize: '0.9rem', fontWeight: 600, textDecoration: p.concluido ? 'line-through' : 'none', color: p.concluido ? 'var(--text-2)' : 'var(--text-1)' }}>{p.titulo}</div>
-                        <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: '0.75rem', color: 'var(--text-2)' }}>
-                          {p.responsavel && <span>Resp: {p.responsavel}</span>}
-                          {p.prazo && <span>Prazo: {new Date(p.prazo + 'T12:00').toLocaleDateString('pt-BR')}</span>}
-                        </div>
-                      </div>
+                      <div style={{ flex: 1, fontSize: '0.88rem', textDecoration: c.concluido ? 'line-through' : 'none', color: c.concluido ? 'var(--text-2)' : 'var(--text-1)' }}>{c.titulo}</div>
+                      <button className="btn btn-ghost" style={{ padding: 6, color: '#EF4444' }} onClick={() => deleteCriterio(c.id)} title="Remover"><Trash2 size={13} /></button>
                     </div>
-                  ))
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="form-input" placeholder="Ex: Endpoint retorna 200 com payload válido"
+                    value={novoCriterio} onChange={e => setNovoCriterio(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addCriterio()} />
+                  <button className="btn btn-primary" onClick={addCriterio}><Plus size={14} /> Adicionar</button>
+                </div>
+              </div>
+
+              {/* [C] Subtarefas */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    C · Subtarefas
+                  </div>
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setShowSubtarefaForm(!showSubtarefaForm)}>
+                    <Plus size={13} /> Nova subtarefa
+                  </button>
+                </div>
+
+                {/* Barra de progresso */}
+                {subtarefas.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-2)' }}>{subtarefasConcluidas} de {subtarefas.length} concluídas</span>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)' }}>{subtarefasProgresso}%</span>
+                    </div>
+                    <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ width: `${subtarefasProgresso}%`, height: '100%', background: 'var(--primary)', transition: 'width 0.3s' }} />
+                    </div>
+                  </div>
                 )}
+
+                {showSubtarefaForm && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 10, marginBottom: 12, background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 8, border: '1px solid var(--border)', alignItems: 'end' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.7rem' }}>Título</label>
+                      <input className="form-input" style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                        value={subtarefaForm.titulo} onChange={e => setSubtarefaForm(f => ({ ...f, titulo: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.7rem' }}>Responsável</label>
+                      <select className="form-select" style={{ padding: '6px 10px', fontSize: '0.8rem', minWidth: 120 }}
+                        value={subtarefaForm.responsavel} onChange={e => setSubtarefaForm(f => ({ ...f, responsavel: e.target.value }))}>
+                        <option value="">—</option>
+                        {RESPONSAVEIS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.7rem' }}>Prazo</label>
+                      <input className="form-input" type="date" style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                        value={subtarefaForm.prazo} onChange={e => setSubtarefaForm(f => ({ ...f, prazo: e.target.value }))} />
+                    </div>
+                    <button className="btn btn-primary" style={{ height: 33 }} onClick={addSubtarefa}>Salvar</button>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {subtarefas.length === 0 ? (
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-2)', fontStyle: 'italic' }}>Nenhuma subtarefa ainda.</div>
+                  ) : subtarefas.map((s, index) => (
+                    <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--bg-card)', padding: '10px 14px', borderRadius: 6, border: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <button style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }} onClick={() => moveSubtarefa(index, -1)} disabled={index === 0}><ArrowUp size={13} /></button>
+                        <button style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }} onClick={() => moveSubtarefa(index, 1)} disabled={index === subtarefas.length - 1}><ArrowDown size={13} /></button>
+                      </div>
+
+                      <div style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => toggleSubtarefa(s.id)}>
+                        <div style={{ width: 18, height: 18, borderRadius: 4, border: `1px solid ${s.concluido ? 'var(--primary)' : 'var(--border)'}`, background: s.concluido ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {s.concluido && <Check size={12} color="#000" />}
+                        </div>
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, textDecoration: s.concluido ? 'line-through' : 'none', color: s.concluido ? 'var(--text-2)' : 'var(--text-1)' }}>{s.titulo}</div>
+                        <div style={{ display: 'flex', gap: 10, marginTop: 4, fontSize: '0.72rem', color: 'var(--text-2)', alignItems: 'center' }}>
+                          {s.responsavel && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <ResponsavelAvatar nome={s.responsavel} size={16} />
+                              {s.responsavel}
+                            </span>
+                          )}
+                          {s.prazo && <span>Prazo: {new Date(s.prazo + 'T12:00').toLocaleDateString('pt-BR')}</span>}
+                        </div>
+                      </div>
+
+                      <button className="btn btn-ghost" style={{ padding: 6, color: '#EF4444' }} onClick={() => deleteSubtarefa(s.id)} title="Remover"><Trash2 size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* [D] Dependências */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  D · Esta atividade depende de…
+                </div>
+                <textarea
+                  className="form-textarea"
+                  style={{ minHeight: 80, fontSize: '0.85rem', lineHeight: 1.5 }}
+                  placeholder="Ex: aprovação do cliente, finalização da API X, contratação do dev Y..."
+                  value={dependencias}
+                  onChange={e => setDependencias(e.target.value)}
+                  onBlur={() => {
+                    if (dependencias !== (extraInfo.dependencias || '')) {
+                      patchExtraInfo('dependencias', dependencias);
+                      addLog('Dependências atualizadas');
+                    }
+                  }}
+                />
+              </div>
+
+              {/* [E] Definition of Done */}
+              <div>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                  E · Definição de Pronto
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {DOD_DEFAULT_ITEMS.map(item => {
+                    const ok = !!dod[item];
+                    return (
+                      <label key={item} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer' }}>
+                        <div onClick={() => toggleDoD(item)} style={{ width: 18, height: 18, borderRadius: 4, border: `1px solid ${ok ? 'var(--primary)' : 'var(--border)'}`, background: ok ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          {ok && <Check size={12} color="#000" />}
+                        </div>
+                        <span style={{ fontSize: '0.88rem', color: ok ? 'var(--text-2)' : 'var(--text-1)', textDecoration: ok ? 'line-through' : 'none' }}>{item}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 

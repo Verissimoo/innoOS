@@ -1,12 +1,14 @@
 import React from 'react';
-import { LayoutDashboard, Zap, Users, CalendarDays, Lightbulb } from 'lucide-react';
+import { LayoutDashboard, Zap, Users, Lightbulb, ClipboardList, DollarSign, CalendarDays } from 'lucide-react';
 
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'automacoes', label: 'Automações', icon: Zap },
-  { id: 'clientes', label: 'Clientes', icon: Users },
-  { id: 'agenda', label: 'Agenda & Rituais', icon: CalendarDays },
-  { id: 'backlog', label: 'Ideias & Backlog', icon: Lightbulb },
+  { id: 'dashboard',   label: 'Visão Geral',           icon: LayoutDashboard },
+  { id: 'automacoes',  label: 'Automações e Sistemas', icon: Zap },
+  { id: 'clientes',    label: 'Clientes',              icon: Users },
+  { id: 'backlog',     label: 'Ideias & Backlog',      icon: Lightbulb },
+  { id: 'processos',   label: 'Processos',             icon: ClipboardList },
+  { id: 'financeiro',  label: 'Financeiro',            icon: DollarSign },
+  { id: 'agenda',      label: 'Agenda & Rituais',      icon: CalendarDays },
 ];
 
 export default function Sidebar({ active, onSelect }) {
